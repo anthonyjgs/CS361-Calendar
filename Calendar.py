@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import zmq
 import datetime as dt
 
@@ -42,55 +44,85 @@ def parse_request(raw_req) -> Request:
 
 
 def process_request(req: Request) -> dict:
-    match req.type:
+    status = "success"
+    
+    match (req.type):
         case "select exact":
             result = get_items_exact(req)
         case "select range" | "select after" | "select before":
             result = get_items_in_range(req)
         case "select daily range":
-            pass
+            result = get_items_in_daily_range(req)
         case "select monthly range":
-            pass
+            result = get_items_in_monthly_range(req)
         case "select yearly range":
-            pass
+            result = get_items_in_yearly_range(req)
         case _:
-            pass
-    pass
+            status = "error"
+            result = f"Unknown request type: {req.type}"
+
+    return {"status": status, "data": result}
 
 
 def get_items_exact(req: Request) -> list:
     """ Returns the items whose datetime matches the request's exactly """
-    pass
+    return [item for item in req.items if item.date == req.start_date]
 
 def get_items_in_range(req: Request) -> list:
     """ Returns the items whose datetime is within (inclusive) the given
         range. """
-    pass
+    return [item for item in req.items if (req.start_date <= item.date <= req.end_date)]
 
 def get_items_in_daily_range(req: Request) -> list:
     """ Returns the items whose datetime is within a given range of time during
         the day, such as items between 6pm and 8pm. """
-    pass
+    matches = []
+
+    for item in req.items:
+        item_time = item.datetime.time()
+        if req.start_date.time() <= item_time <= req.end_date.time():
+            matches.append(item)
+
+    return matches
 
 def get_items_in_weekly_range(req: Request) -> list:
     """ Returns the items whose datetime is within a given range during a week,
         such as items on Fridays and Saturdays. """
-    pass
+    matches = []
+    start_day = req.start_date.weekday()
+    end_day = req.end_date.weekday()
+
+    for item in req.items:
+        item_day = item.datetime.weekday()
+        if start_day <= item_day <= end_day:
+            matches.append(item)
+
+    return matches
 
 def get_items_in_monthly_range(req: Request) -> list:
     """ Returns items whose datetime is within a given range during a month,
         such as items on the 1st of the months, or during the 2nd weeks. """
-    pass
+    matches = []
+
+    for item in req.items:
+        if req.start_date.day <= item.datetime.day <= req.end_date.day:
+            matches.append(item)
+
+    return matches
 
 def get_items_in_yearly_range(req: Request) -> list:
     """ Returns items whose datetime is within a given range during a year,
         such as items in the summers. """
-    pass
+    matches = []
 
-def get_items_in_interval(req: Request) -> list:
-    """ Returns items within the given range relative to an interval, such as
-        items from 12pm to 1pm on every 3rd day."""
-    pass
+    normalized_start = req.start_date.replace(year=1)
+    normalized_end = req.end_date.replace(year=1)
+    for item in req.items:
+        normalized_item = item.datetime.replace(year=1)
+        if normalized_start <= normalized_item <= normalized_end:
+            matches.append(item)
+
+    return matches
 
 if __name__ == "__main__":
     main()

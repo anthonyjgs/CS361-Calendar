@@ -1,15 +1,39 @@
 import zmq
 import datetime as dt
+import config
+
+# Request actions
+class Actions:
+    SEL_EXACT = "select exact"
+    SEL_RANGE = "select range"
+    SEL_AFTER = "select after"
+    SEL_BEFORE = "select before"
+    SEL_DAILY = "select daily range"
+    SEL_MONTHLY = "select monthly range"
+    SEL_YEARLY = "select yearly range"
+
+# Response Statuses
+STATUS_SUCCESS = "success"
+STATUS_ERROR = "error"
+
+# Response Error Strings
+ERR_REQ_MISSING_KEY = "request is missing a key-value(s)"
+ERR_ITEM_MISSING_KEY = "item is missing a key-value(s)"
+ERR_REQ_BAD_TIMESTAMP = "start or end date has invalid iso timestamp"
+ERR_ITEM_BAD_TIMESTAMP = "item has invalid iso timestamp"
+ERR_UNKNOWN_ACTION = "unknown action"
 
 
-PORT = 414635
+class Item:
+    date_time: dt.datetime
+    data = None
 
 class Request:
     """ The essential data to process calendar requests """
-    type: str
+    action: str
     start_date: dt.datetime
     end_date: dt.datetime
-    count: int
+    count: int|None
     items: list
 
 def main():
@@ -17,8 +41,8 @@ def main():
     print("Initializing...")
     context = zmq.Context()
     socket = context.socket(zmq.REP)
-    socket.bind(f"tcp://localhost:{PORT}")
-    print(f"Listening on port {PORT}")
+    socket.bind(f"tcp://localhost:{config.PORT}")
+    print(f"Listening on port {config.PORT}")
 
     try:
         while True:
@@ -35,14 +59,14 @@ def service_listen(socket: zmq.Socket) -> None:
     parsed_req, error = parse_request(req)
 
     if error is not None:
-        reply = {"status": "error", "data": error}
+        reply = {"status": STATUS_ERROR, "data": error}
     else:
         reply = process_request(parsed_req)
 
     socket.send_json(reply)
 
 
-def parse_request(raw_req) -> tuple[Request, str]:
+def parse_request(raw_req) -> tuple[Request, str|None]:
     """ Parses the request and returns the parsed request. Returns an error
         string as well if something goes wrong. """
     error_str = None
@@ -51,46 +75,74 @@ def parse_request(raw_req) -> tuple[Request, str]:
     # Fill the request object with the parsed values, returning an error string
     # describing any failures
     try:
-        request.type = raw_req["type"]
-        request.count = int(raw_req["count"])
-        request.items = raw_req["items"]
+        request.action = raw_req["action"]
+
+        request.items, error_str = parse_items(raw_req["items"])
+        if error_str is not None:
+            return request, error_str
+
+        if raw_req["count"] is not None:
+            request.count = int(raw_req["count"])
+        else:
+            request.count = None
 
         # Parse iso timestamps into datetime objects
         try:
             request.start_date = dt.datetime.fromisoformat(raw_req["start_date"])
             request.end_date = dt.datetime.fromisoformat(raw_req["end_date"])
-        except ValueError as e:
-            print(f"Error during parsing: {e}")
-            request.type = "error"
-            error_str = "bad iso timestamp"
 
+        except ValueError as e:
+            print(f"ValueError during parsing: {e}")
+            error_str = ERR_REQ_BAD_TIMESTAMP
     except KeyError as e:
-        print(f"Error during parsing: {e}")
-        request.type = "error"
-        error_str = "data is missing one of the key-value pairs"
+        print(f"KeyError during request parsing: {e}")
+        error_str = ERR_REQ_MISSING_KEY
 
     return request, error_str
 
+def parse_items(raw_items) -> tuple[list, str|None]:
+    """ Parses one item from the json dict into an item object """
+    error_str = None
+    parsed_items = []
+    for raw_item in raw_items:
+        parsed_item = Item()
+        try:
+            parsed_item.date = dt.datetime.fromisoformat(raw_item["date_time"])
+            parsed_item.data = raw_item["data"]
+            parsed_items.append(parsed_item)
+
+        except KeyError as e:
+            print(f"KeyError during item parsing: {e}")
+            error_str = ERR_ITEM_MISSING_KEY
+            return parsed_items, error_str
+        except ValueError as e:
+            print(f"ValueError during item parsing: {e}")
+            error_str = ERR_ITEM_MISSING_KEY
+            return parsed_items, error_str
+
+    return parsed_items, error_str
+
 
 def process_request(req: Request) -> dict:
-    """ Proceses the request based on its 'type' field, returning a dict with
+    """ Proceses the request based on its 'action' field, returning a dict with
         the result's status and data """
     status = "success"
     
-    match (req.type):
-        case "select exact":
+    match req.action:
+        case Actions.SEL_EXACT:
             result = get_items_exact(req)
-        case "select range" | "select after" | "select before":
+        case Actions.SEL_RANGE | Actions.SEL_AFTER | Actions.SEL_BEFORE:
             result = get_items_in_range(req)
-        case "select daily range":
+        case Actions.SEL_DAILY:
             result = get_items_in_daily_range(req)
-        case "select monthly range":
+        case Actions.SEL_MONTHLY:
             result = get_items_in_monthly_range(req)
-        case "select yearly range":
+        case Actions.SEL_YEARLY:
             result = get_items_in_yearly_range(req)
+
         case _:
             status = "error"
-            result = f"Unknown request type: {req.type}"
+            result = f"{ERR_UNKNOWN_ACTION}: {req.action}"
 
     return {"status": status, "data": result}
 

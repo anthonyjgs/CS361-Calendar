@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 import zmq
 import datetime as dt
 
@@ -31,19 +29,52 @@ def main():
 
 
 def service_listen(socket: zmq.Socket) -> None:
+    """ Listen and process one request """
     req = socket.recv_json()
-    parsed_req = parse_request(req)
 
-    rep = process_request(parsed_req)
-    socket.send_json(rep)
+    parsed_req, error = parse_request(req)
+
+    if error is not None:
+        reply = {"status": "error", "data": error}
+    else:
+        reply = process_request(parsed_req)
+
+    socket.send_json(reply)
 
 
+def parse_request(raw_req) -> tuple[Request, str]:
+    """ Parses the request and returns the parsed request. Returns an error
+        string as well if something goes wrong. """
+    error_str = None
+    request = Request()
 
-def parse_request(raw_req) -> Request:
-    pass
+    # Fill the request object with the parsed values, returning an error string
+    # describing any failures
+    try:
+        request.type = raw_req["type"]
+        request.count = int(raw_req["count"])
+        request.items = raw_req["items"]
+
+        # Parse iso timestamps into datetime objects
+        try:
+            request.start_date = dt.datetime.fromisoformat(raw_req["start_date"])
+            request.end_date = dt.datetime.fromisoformat(raw_req["end_date"])
+        except ValueError as e:
+            print(f"Error during parsing: {e}")
+            request.type = "error"
+            error_str = "bad iso timestamp"
+
+    except KeyError as e:
+        print(f"Error during parsing: {e}")
+        request.type = "error"
+        error_str = "data is missing one of the key-value pairs"
+
+    return request, error_str
 
 
 def process_request(req: Request) -> dict:
+    """ Proceses the request based on its 'type' field, returning a dict with
+        the result's status and data """
     status = "success"
     
     match (req.type):

@@ -55,6 +55,7 @@ def main():
 def service_listen(socket: zmq.Socket) -> None:
     """ Listen and process one request """
     req = socket.recv_json()
+    print(f"REQUEST RECEIVED: {str(req)}")
 
     parsed_req, error = parse_request(req)
 
@@ -63,6 +64,7 @@ def service_listen(socket: zmq.Socket) -> None:
     else:
         reply = process_request(parsed_req)
 
+    print(f"SENDING REPLY: {str(reply)}")
     socket.send_json(reply)
 
 
@@ -130,31 +132,37 @@ def process_request(req: Request) -> dict:
     
     match req.action:
         case Actions.SEL_EXACT:
-            result = get_items_exact(req)
+            items = get_items_exact(req)
         case Actions.SEL_RANGE | Actions.SEL_AFTER | Actions.SEL_BEFORE:
-            result = get_items_in_range(req)
+            items = get_items_in_range(req)
         case Actions.SEL_DAILY:
-            result = get_items_in_daily_range(req)
+            items = get_items_in_daily_range(req)
         case Actions.SEL_MONTHLY:
-            result = get_items_in_monthly_range(req)
+            items = get_items_in_monthly_range(req)
         case Actions.SEL_YEARLY:
-            result = get_items_in_yearly_range(req)
-
+            items = get_items_in_yearly_range(req)
         case _:
-            status = "error"
-            result = f"{ERR_UNKNOWN_ACTION}: {req.action}"
+            return {"status": "error", "data": f"{ERR_UNKNOWN_ACTION}: {req.action}"}
 
-    return {"status": status, "data": result}
+    return {"status": status, "data": items}
 
 
 def get_items_exact(req: Request) -> list:
     """ Returns the items whose datetime matches the request's exactly """
-    return [item for item in req.items if item.date == req.start_date]
+    matches = []
+    for item in req.items:
+         if item.date == req.start_date:
+             matches.append(item)
+    return matches
 
 def get_items_in_range(req: Request) -> list:
     """ Returns the items whose datetime is within (inclusive) the given
         range. """
-    return [item for item in req.items if (req.start_date <= item.date <= req.end_date)]
+    matches = []
+    for item in req.items:
+        if req.start_date <= item.date <= req.end_date:
+            matches.append(item.data)
+    return matches
 
 def get_items_in_daily_range(req: Request) -> list:
     """ Returns the items whose datetime is within a given range of time during
@@ -164,7 +172,7 @@ def get_items_in_daily_range(req: Request) -> list:
     for item in req.items:
         item_time = item.datetime.time()
         if req.start_date.time() <= item_time <= req.end_date.time():
-            matches.append(item)
+            matches.append(item.data)
 
     return matches
 
@@ -178,7 +186,7 @@ def get_items_in_weekly_range(req: Request) -> list:
     for item in req.items:
         item_day = item.datetime.weekday()
         if start_day <= item_day <= end_day:
-            matches.append(item)
+            matches.append(item.data)
 
     return matches
 
@@ -189,7 +197,7 @@ def get_items_in_monthly_range(req: Request) -> list:
 
     for item in req.items:
         if req.start_date.day <= item.datetime.day <= req.end_date.day:
-            matches.append(item)
+            matches.append(item.data)
 
     return matches
 
@@ -203,7 +211,7 @@ def get_items_in_yearly_range(req: Request) -> list:
     for item in req.items:
         normalized_item = item.datetime.replace(year=1)
         if normalized_start <= normalized_item <= normalized_end:
-            matches.append(item)
+            matches.append(item.data)
 
     return matches
 
